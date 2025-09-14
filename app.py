@@ -116,51 +116,51 @@ def check_password(customers_df):
 # --- PDF GENERATION ---
 class PDF(FPDF):
     def header(self):
-        self.set_font('Arial', 'B', 15)
+        self.add_font('DejaVu', '', 'assets/DejaVuSans.ttf', uni=True)
+        self.set_font('DejaVu', '', 15)
         self.cell(0, 10, 'Ahirwal Trading & Mill Store', 0, 1, 'C')
-        self.set_font('Arial', '', 10)
+        self.set_font('DejaVu', '', 10)
         self.cell(0, 5, 'Order Enquiry', 0, 1, 'C')
         self.ln(10)
 
     def footer(self):
         self.set_y(-15)
-        self.set_font('Arial', 'I', 8)
+        self.set_font('DejaVu', '', 8)
         self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
 
 def create_order_pdf(customer_info, po_number, cart_df):
     pdf = PDF()
     pdf.add_page()
-    pdf.set_font('Arial', 'B', 12)
+    pdf.add_font('DejaVu', '', 'assets/DejaVuSans.ttf', uni=True)
+    pdf.set_font('DejaVu', '', 12)
     pdf.cell(0, 10, f"Customer: {customer_info['customer_name']}", 0, 1)
     if po_number: pdf.cell(0, 10, f"PO Number: {po_number}", 0, 1)
     pdf.cell(0, 10, f"Date: {pd.Timestamp.now().strftime('%d-%b-%Y')}", 0, 1)
     pdf.ln(5)
 
-    pdf.set_font('Arial', 'B', 10)
-    pdf.cell(20, 10, 'SKU', 1)
-    pdf.cell(90, 10, 'Product Name', 1)
+    pdf.set_font('DejaVu', '', 10)
+    pdf.cell(25, 10, 'SKU', 1)
+    pdf.cell(85, 10, 'Product Name', 1)
     pdf.cell(20, 10, 'Qty', 1)
     pdf.cell(30, 10, 'Unit Price', 1)
     pdf.cell(30, 10, 'Total', 1)
     pdf.ln()
-
-    pdf.set_font('Arial', '', 10)
+    
     for _, row in cart_df.iterrows():
-        pdf.cell(20, 10, str(row['sku']), 1)
-        pdf.cell(90, 10, str(row['name']), 1)
+        pdf.cell(25, 10, str(row['sku']), 1)
+        pdf.cell(85, 10, str(row['name']), 1)
         pdf.cell(20, 10, str(row['quantity']), 1)
         pdf.cell(30, 10, f"Rs. {row['price']:.2f}", 1)
         pdf.cell(30, 10, f"Rs. {row['total']:.2f}", 1)
         pdf.ln()
     
     grand_total = cart_df['total'].sum()
-    pdf.set_font('Arial', 'B', 12)
+    pdf.set_font('DejaVu', '', 12)
     pdf.cell(130, 10, '', 0)
     pdf.cell(30, 10, 'Grand Total', 1)
     pdf.cell(30, 10, f"Rs. {grand_total:,.2f}", 1)
     pdf.ln()
-    return pdf.output(dest='S').encode('latin-1')
-
+    return pdf.output()
 
 # --- HELPER & UI FUNCTIONS ---
 def add_to_cart(sku, name, quantity, price):
@@ -262,7 +262,6 @@ def render_vbelt_selector(df, discount):
                 final_selection = filtered_by_section[filtered_by_section['size'] == selected_size]
                 if not final_selection.empty: display_variant_for_purchase(final_selection.iloc[0], discount)
 
-# --- PAGE RENDERING FUNCTIONS ---
 def render_home_page(all_data):
     col1, col2 = st.columns([1, 2]);
     with col1:
@@ -270,7 +269,7 @@ def render_home_page(all_data):
     with col2: 
         image_path = Path(__file__).parent / "assets" / "hero_image.png"
         if image_path.exists(): st.image(str(image_path), use_column_width=True)
-        else: st.warning("Hero image not found in assets folder.")
+        else: st.warning("Hero image not found. Please ensure 'assets/hero_image.png' is uploaded to GitHub.")
     categories = all_data['categories']
     for i in range(0, len(categories), 4):
         row_categories = categories.iloc[i:i+4]; cols = st.columns(4)
@@ -289,7 +288,7 @@ def render_home_page(all_data):
         with cols[i]:
             with st.container():
                 st.markdown('<div class="product-container">', unsafe_allow_html=True)
-                if pd.notna(row.get('image_url')): st.image(row['image_url'], use_column_width=True, output_format='PNG', caption=row['product_name'])
+                if pd.notna(row.get('image_url')): st.image(row['image_url'], use_container_width=True, output_format='PNG', caption=row['product_name'])
                 st.subheader(row['product_name']); st.caption(f"SKU: {row['product_sku']}")
                 st.markdown(f"**Your Price:** :green[₹{row['base_rate'] * (1 - user_discount):.2f}]")
                 quantity = st.number_input("Qty", min_value=1, value=1, key=f"qty_feat_{row['product_sku']}")
