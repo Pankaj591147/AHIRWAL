@@ -1,5 +1,5 @@
 # Ahirwal Trading - Professional B2B Self-Service Portal
-# Definitive Final Version: Fully functional with zero placeholders.
+# Definitive Final Version: Fully functional with all fixes.
 
 import streamlit as st
 import pandas as pd
@@ -113,10 +113,11 @@ def check_password(customers_df):
         return False
     return True
 
-# --- PDF GENERATION ---
+# --- PDF GENERATION (WITH FONT PATH FIX) ---
 class PDF(FPDF):
     def header(self):
-        self.add_font('DejaVu', '', 'assets/DejaVuSans.ttf', uni=True)
+        font_path = Path(__file__).parent / "assets" / "DejaVuSans.ttf"
+        self.add_font('DejaVu', '', str(font_path), uni=True)
         self.set_font('DejaVu', '', 15)
         self.cell(0, 10, 'Ahirwal Trading & Mill Store', 0, 1, 'C')
         self.set_font('DejaVu', '', 10)
@@ -131,8 +132,11 @@ class PDF(FPDF):
 def create_order_pdf(customer_info, po_number, cart_df):
     pdf = PDF()
     pdf.add_page()
-    pdf.add_font('DejaVu', '', 'assets/DejaVuSans.ttf', uni=True)
+    # FIX: Define the robust path to the font file
+    font_path = Path(__file__).parent / "assets" / "DejaVuSans.ttf"
+    pdf.add_font('DejaVu', '', str(font_path), uni=True)
     pdf.set_font('DejaVu', '', 12)
+    
     pdf.cell(0, 10, f"Customer: {customer_info['customer_name']}", 0, 1)
     if po_number: pdf.cell(0, 10, f"PO Number: {po_number}", 0, 1)
     pdf.cell(0, 10, f"Date: {pd.Timestamp.now().strftime('%d-%b-%Y')}", 0, 1)
@@ -161,6 +165,7 @@ def create_order_pdf(customer_info, po_number, cart_df):
     pdf.cell(30, 10, f"Rs. {grand_total:,.2f}", 1)
     pdf.ln()
     return pdf.output()
+
 
 # --- HELPER & UI FUNCTIONS ---
 def add_to_cart(sku, name, quantity, price):
@@ -268,7 +273,7 @@ def render_home_page(all_data):
         st.header(f"Dashboard"); st.write(f"Welcome back, {st.session_state.user_details['customer_name']}."); st.markdown("### Shop by Category")
     with col2: 
         image_path = Path(__file__).parent / "assets" / "hero_image.png"
-        if image_path.exists(): st.image(str(image_path), use_column_width=True)
+        if image_path.exists(): st.image(str(image_path), use_column_width=True) # FIX: Corrected parameter
         else: st.warning("Hero image not found. Please ensure 'assets/hero_image.png' is uploaded to GitHub.")
     categories = all_data['categories']
     for i in range(0, len(categories), 4):
@@ -288,7 +293,7 @@ def render_home_page(all_data):
         with cols[i]:
             with st.container():
                 st.markdown('<div class="product-container">', unsafe_allow_html=True)
-                if pd.notna(row.get('image_url')): st.image(row['image_url'], use_container_width=True, output_format='PNG', caption=row['product_name'])
+                if pd.notna(row.get('image_url')): st.image(row['image_url'], use_column_width=True, output_format='PNG', caption=row['product_name'])
                 st.subheader(row['product_name']); st.caption(f"SKU: {row['product_sku']}")
                 st.markdown(f"**Your Price:** :green[₹{row['base_rate'] * (1 - user_discount):.2f}]")
                 quantity = st.number_input("Qty", min_value=1, value=1, key=f"qty_feat_{row['product_sku']}")
@@ -338,6 +343,7 @@ excel_file_path = Path(__file__).parent / "database.xlsx"
 all_data = load_data(excel_file_path)
 
 if all_data and check_password(all_data['customers']):
+    if 'cart' not in st.session_state: st.session_state.cart = []
     render_sidebar()
     st.radio("Navigation", ["Home", "Order Pad", "View Cart & Submit"], key="current_page", horizontal=True, label_visibility="collapsed")
     st.markdown("---")
