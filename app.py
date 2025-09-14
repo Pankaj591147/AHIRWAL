@@ -1,5 +1,5 @@
 # Ahirwal Trading - Professional B2B Self-Service Portal
-# Themed version - styling is controlled by .streamlit/config.toml
+# Final Themed Version with Full Variant Selection Logic
 
 import streamlit as st
 import pandas as pd
@@ -12,12 +12,10 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- STYLING (Layout Only) ---
-# Colors are now controlled by .streamlit/config.toml
-# This CSS is only for layout and structure.
+# --- STYLING (Controlled by .streamlit/config.toml and this for layout) ---
 st.markdown("""
 <style>
-    /* Custom container for product items */
+    .stApp { padding-top: 2rem; }
     .product-container {
         border: 1px solid #E0E0E0;
         border-radius: 8px;
@@ -25,16 +23,11 @@ st.markdown("""
         margin-bottom: 10px;
         background-color: #FFFFFF;
     }
-    /* Reduce top padding */
-    .stApp {
-        padding-top: 2rem;
-    }
 </style>
 """, unsafe_allow_html=True)
 
-
 # --- DATA LOADING ---
-@st.cache_data(ttl=300) # Cache for 5 minutes
+@st.cache_data(ttl=300)
 def load_data(filepath):
     try:
         xls = pd.ExcelFile(filepath)
@@ -49,116 +42,182 @@ def load_data(filepath):
         data['customers'] = pd.merge(data['customers'], data['price_tiers'], left_on='price_tier_name', right_on='tier_name')
         return data
     except Exception as e:
-        st.error(f"Fatal Error: Could not load or process database.xlsx. Please check the file and sheet names. Details: {e}")
+        st.error(f"Fatal Error: Could not load or process database.xlsx. Details: {e}")
         return None
 
 # --- AUTHENTICATION ---
 def check_password(customers_df):
-    if "user_logged_in" not in st.session_state:
-        st.session_state["user_logged_in"] = False
-
+    if "user_logged_in" not in st.session_state: st.session_state["user_logged_in"] = False
     if not st.session_state["user_logged_in"]:
         st.image("https://placehold.co/400x100/007BC0/FFFFFF?text=Ahirwal+Trading", width=300)
         st.title("B2B Customer Portal")
-
         with st.form("credentials"):
             username = st.text_input("Registered Business Name")
             password = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Log in")
-
-            if submitted:
+            if st.form_submit_button("Log in"):
                 try:
                     if username in st.secrets["passwords"] and st.secrets["passwords"][username] == password:
                         st.session_state["user_logged_in"] = True
                         user_details = customers_df[customers_df['customer_name'] == username].iloc[0]
                         st.session_state["user_details"] = user_details.to_dict()
                         st.rerun()
-                    else:
-                        st.error("😕 Username not found or password incorrect")
-                except Exception:
-                    st.error("Authentication system error. Please contact support.")
+                    else: st.error("😕 Username not found or password incorrect")
+                except Exception: st.error("Authentication system error. Check Secrets setup.")
         return False
     return True
 
-# --- UI RENDERERS & HELPERS (No changes from previous version) ---
+# --- HELPER & UI FUNCTIONS ---
 def add_to_cart(sku, name, quantity, price):
-    # Check if item already in cart
     for item in st.session_state.cart:
         if item['sku'] == sku:
             item['quantity'] += quantity
             item['total'] = item['quantity'] * item['price']
-            st.toast(f"Updated '{name}' in cart!", icon="🛒")
-            return
-
-    # If not, add new item
+            st.toast(f"Updated '{name}' in cart!", icon="🛒"); return
     cart_item = {'sku': sku, 'name': name, 'quantity': quantity, 'price': price, 'total': price * quantity}
     st.session_state.cart.append(cart_item)
     st.toast(f"Added '{name}' to cart!", icon="🛒")
 
-
 def render_sidebar():
     user_info = st.session_state['user_details']
     with st.sidebar:
-        st.image("https://placehold.co/200x60/007BC0/FFFFFF?text=Ahirwal", use_column_width=True)
+        # FIX 1: Replaced deprecated 'use_column_width' with 'use_container_width'
+        st.image("https://placehold.co/200x60/007BC0/FFFFFF?text=Ahirwal", use_container_width=True)
         st.subheader("Welcome,")
         st.title(f"{user_info['customer_name']}")
         st.markdown("---")
-
         col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Your Tier", user_info['price_tier_name'])
-        with col2:
-            st.metric("Your Discount", f"{user_info['discount_percentage']:.0%}")
+        col1.metric("Your Tier", user_info['price_tier_name'])
+        col2.metric("Your Discount", f"{user_info['discount_percentage']:.0%}")
         st.markdown("---")
-
         st.header("Order Summary")
-        if not st.session_state.cart:
-            st.info("Your cart is empty.")
+        if not st.session_state.cart: st.info("Your cart is empty.")
         else:
             cart_df = pd.DataFrame(st.session_state.cart)
             grand_total = cart_df['total'].sum()
             st.metric("Order Total", f"₹{grand_total:,.2f}")
-
         if st.button("Logout", use_container_width=True):
-            # Clear all session state keys
-            for key in st.session_state.keys():
-                del st.session_state[key]
+            for key in st.session_state.keys(): del st.session_state[key]
+            st.rerun()
+
+# --- FIX 2: FULLY IMPLEMENTED VARIANT SELECTORS ---
+def render_nutbolt_selector(df, discount):
+    with st.container(border=True):
+        st.subheader("Nut and Bolt Selector")
+        materials = [''] + df['material'].unique().tolist()
+        selected_material = st.selectbox("1. Material", materials, key="nb_material")
+
+        if selected_material:
+            filtered_by_material = df[df['material'] == selected_material]
+            if selected_material == 'GI':
+                dias = [''] + filtered_by_material['dia'].unique().tolist()
+                selected_dia = st.selectbox("2. Size", dias, key="nb_dia_gi")
+                if selected_dia:
+                    final_selection = filtered_by_material[filtered_by_material['dia'] == selected_dia]
+                    display_variant_for_purchase(final_selection.iloc[0], discount)
+            else:
+                dias = [''] + filtered_by_material['dia'].unique().tolist()
+                selected_dia = st.selectbox("2. Diameter", dias, key="nb_dia")
+                if selected_dia:
+                    filtered_by_dia = filtered_by_material[filtered_by_material['dia'] == selected_dia]
+                    lengths = [''] + filtered_by_dia['length_mm'].unique().tolist()
+                    selected_length = st.selectbox("3. Length (mm)", lengths, key="nb_length")
+                    if selected_length:
+                        final_selection = filtered_by_dia[filtered_by_dia['length_mm'] == selected_length]
+                        display_variant_for_purchase(final_selection.iloc[0], discount)
+
+def render_vbelt_selector(df, discount):
+    with st.container(border=True):
+        st.subheader("V-Belt Selector")
+        sections = [''] + df['section'].unique().tolist()
+        selected_section = st.selectbox("1. Section", sections, key="vb_section")
+        if selected_section:
+            filtered_by_section = df[df['section'] == selected_section]
+            sizes = [''] + filtered_by_section['size'].unique().tolist()
+            selected_size = st.selectbox("2. Size", sizes, key="vb_size")
+            if selected_size:
+                final_selection = filtered_by_section[filtered_by_section['size'] == selected_size]
+                display_variant_for_purchase(final_selection.iloc[0], discount)
+
+def display_variant_for_purchase(variant_series, discount):
+    customer_price = variant_series['rate'] * (1 - discount)
+    product_name = f"V-Belt {variant_series['size']}" if 'size' in variant_series else f"Bolt-{variant_series['material']}-{variant_series['dia']}" + (f"x{variant_series['length_mm']}mm" if variant_series['length_mm'] > 0 else "")
+    
+    st.markdown("---")
+    st.write(f"**Selected:** {product_name}")
+    col1, col2, col3, col4 = st.columns([2,2,2,2])
+    col1.metric("In Stock", f"{int(variant_series['stock_level'])} {variant_series['unit_of_sale']}")
+    col2.metric("Your Price", f"₹{customer_price:.2f}", help=f"per {variant_series['unit_of_sale']}")
+    quantity = col3.number_input(f"Quantity ({variant_series['unit_of_sale']})", min_value=0.1 if variant_series['unit_of_sale']=='KG' else 1, value=1.0 if variant_series['unit_of_sale']=='KG' else 1, step=0.1 if variant_series['unit_of_sale']=='KG' else 1, key=f"qty_{variant_series['variant_sku']}")
+    if col4.button("Add to Cart", key=f"add_{variant_series['variant_sku']}", use_container_width=True):
+        if quantity > 0:
+            add_to_cart(variant_series['variant_sku'], product_name, quantity, customer_price)
             st.rerun()
 
 def render_simple_products(df, discount):
-    # ... (code for rendering simple products, no changes)
-    st.info("Render simple products logic here.")
-
-
-def render_variant_selectors(all_data, user_discount):
-    # ... (code for category selection and calling variant renderers, no changes)
-    st.info("Render variant selectors logic here.")
+    for _, row in df.iterrows():
+        with st.container():
+            st.markdown('<div class="product-container">', unsafe_allow_html=True)
+            col1, col2, col3, col4 = st.columns([4, 2, 2, 2])
+            with col1:
+                st.subheader(row['product_name'])
+                st.caption(f"SKU: {row['product_sku']}")
+            with col2: st.metric("In Stock", f"{int(row['stock_level'])} {row['base_units']}")
+            with col3:
+                st.markdown(f"**Your Price:**")
+                st.markdown(f"### :green[₹{row['base_rate'] * (1 - discount):.2f}]")
+            with col4:
+                quantity = st.number_input("Qty", min_value=1, value=1, key=f"qty_{row['product_sku']}")
+                if st.button("Add to Cart", key=f"add_{row['product_sku']}", use_container_width=True):
+                    add_to_cart(row['product_sku'], row['product_name'], quantity, row['base_rate'] * (1-discount))
+            st.markdown('</div>', unsafe_allow_html=True)
 
 def render_cart_page():
-    # ... (code for showing the cart and placing the order, no changes)
-    st.info("Render cart page logic here.")
-
+    st.header("📋 Review and Submit Enquiry")
+    if not st.session_state.cart: st.info("Your cart is empty. Add items from the Order Pad."); return
+    
+    cart_df = pd.DataFrame(st.session_state.cart)
+    st.dataframe(cart_df[['name', 'sku', 'quantity', 'price', 'total']], use_container_width=True, hide_index=True,
+                 column_config={"price": st.column_config.NumberColumn(format="₹%.2f"),"total": st.column_config.NumberColumn(format="₹%.2f")})
+    
+    po_number = st.text_input("Enter your Purchase Order (PO) Number (Optional)")
+    if st.button("✅ Submit Enquiry", type="primary", use_container_width=True):
+        grand_total = cart_df['total'].sum()
+        order_summary = f"**Customer:** {st.session_state['user_details']['customer_name']}\n"
+        if po_number: order_summary += f"**PO Number:** {po_number}\n\n"
+        order_summary += cart_df[['name', 'quantity', 'price']].to_markdown(index=False)
+        order_summary += f"\n\n**GRAND TOTAL: ₹{grand_total:,.2f}**"
+        
+        st.success("Enquiry Submitted!")
+        st.code(order_summary, language=None)
+        st.info("Please copy the summary above and send it to us via WhatsApp or Email for processing.")
+        st.session_state.cart = []
 
 # --- MAIN APP LOGIC ---
 excel_file_path = Path(__file__).parent / "database.xlsx"
 all_data = load_data(excel_file_path)
 
-if all_data:
-    if check_password(all_data['customers']):
-        if 'cart' not in st.session_state:
-            st.session_state.cart = []
+if all_data and check_password(all_data['customers']):
+    if 'cart' not in st.session_state: st.session_state.cart = []
+    
+    render_sidebar()
+    
+    page = st.radio("Navigation", ["Order Pad", "View Cart & Submit"], horizontal=True, label_visibility="collapsed")
+    st.markdown("---")
 
-        render_sidebar()
-
-        page = st.radio("Navigation", ["Order Pad", "View Cart & Submit"], horizontal=True)
-        st.markdown("---")
-
-        if page == "Order Pad":
-            st.header("🛒 Order Pad")
-            st.write("Select a category to start adding products to your order.")
-            render_variant_selectors(all_data, st.session_state['user_details']['discount_percentage'])
-
-        elif page == "View Cart & Submit":
-            st.header("📋 Review and Submit Enquiry")
-            render_cart_page()
+    if page == "Order Pad":
+        st.header("🛒 Order Pad")
+        selected_cat = st.selectbox("Select a Product Category", all_data['categories']['category_name'], index=None, placeholder="Choose a category to begin...")
+        if selected_cat:
+            cat_type = all_data['categories'].loc[all_data['categories']['category_name'] == selected_cat, 'selection_type'].iloc[0]
+            user_discount = st.session_state['user_details']['discount_percentage']
+            
+            if cat_type == 'Simple':
+                df = all_data['simple_products'][all_data['simple_products']['category_name'] == selected_cat]
+                render_simple_products(df, user_discount)
+            elif cat_type == 'NutBolt_Variant':
+                render_nutbolt_selector(all_data['nutbolt_variants'], user_discount)
+            elif cat_type == 'VBelt_Variant':
+                render_vbelt_selector(all_data['vbelt_variants'], user_discount)
+    elif page == "View Cart & Submit":
+        render_cart_page()
 
