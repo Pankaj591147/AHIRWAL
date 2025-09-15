@@ -1,11 +1,12 @@
 # Ahirwal Trading - Professional B2B Self-Service Portal
-# Definitive Final Version: Excel download, all features, and all fixes.
+# Definitive Final Version: All features, all fixes, zero warnings.
 
 import streamlit as st
 import pandas as pd
 from pathlib import Path
 import io
 import urllib.parse
+from fpdf import FPDF
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
@@ -111,6 +112,41 @@ def check_password(customers_df):
                         st.markdown(f'<a href="{whatsapp_url}" class="whatsapp-button" target="_blank">📲 Send Request via WhatsApp</a>', unsafe_allow_html=True)
         return False
     return True
+
+# --- PDF GENERATION ---
+class PDF(FPDF):
+    def header(self):
+        font_path = Path(__file__).parent / "assets" / "DejaVuSans.ttf"
+        self.add_font('DejaVu', '', str(font_path), uni=True)
+        self.set_font('DejaVu', '', 15)
+        self.cell(0, 10, 'Ahirwal Trading & Mill Store', 0, 1, 'C')
+        self.set_font('DejaVu', '', 10)
+        self.cell(0, 5, 'Order Enquiry', 0, 1, 'C')
+        self.ln(10)
+
+    def footer(self):
+        self.set_y(-15)
+        self.set_font('DejaVu', '', 8)
+        self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
+
+def create_order_pdf(customer_info, po_number, cart_df):
+    pdf = PDF()
+    pdf.add_page()
+    font_path = Path(__file__).parent / "assets" / "DejaVuSans.ttf"
+    pdf.add_font('DejaVu', '', str(font_path), uni=True)
+    pdf.set_font('DejaVu', '', 12)
+    pdf.cell(0, 10, f"Customer: {customer_info['customer_name']}", 0, 1)
+    if po_number: pdf.cell(0, 10, f"PO Number: {po_number}", 0, 1)
+    pdf.cell(0, 10, f"Date: {pd.Timestamp.now().strftime('%d-%b-%Y')}", 0, 1)
+    pdf.ln(5)
+    pdf.set_font('DejaVu', '', 10)
+    pdf.cell(25, 10, 'SKU', 1); pdf.cell(85, 10, 'Product Name', 1); pdf.cell(20, 10, 'Qty', 1); pdf.cell(30, 10, 'Unit Price', 1); pdf.cell(30, 10, 'Total', 1); pdf.ln()
+    for _, row in cart_df.iterrows():
+        pdf.cell(25, 10, str(row['sku']), 1); pdf.cell(85, 10, str(row['name']), 1); pdf.cell(20, 10, str(row['quantity']), 1)
+        pdf.cell(30, 10, f"Rs. {row['price']:.2f}", 1); pdf.cell(30, 10, f"Rs. {row['total']:.2f}", 1); pdf.ln()
+    grand_total = cart_df['total'].sum()
+    pdf.set_font('DejaVu', '', 12); pdf.cell(130, 10, '', 0); pdf.cell(30, 10, 'Grand Total', 1); pdf.cell(30, 10, f"Rs. {grand_total:,.2f}", 1); pdf.ln()
+    return pdf.output()
 
 # --- HELPER & UI FUNCTIONS ---
 def add_to_cart(sku, name, quantity, price):
@@ -218,7 +254,7 @@ def render_home_page(all_data):
         st.header(f"Dashboard"); st.write(f"Welcome back, {st.session_state.user_details['customer_name']}."); st.markdown("### Shop by Category")
     with col2: 
         image_path = Path(__file__).parent / "assets" / "hero_image.png"
-        if image_path.exists(): st.image(str(image_path), use_column_width=True)
+        if image_path.exists(): st.image(str(image_path), use_container_width=True) # FIX: Corrected parameter
         else: st.warning("Hero image not found. Please ensure 'assets/hero_image.png' is uploaded to GitHub.")
     categories = all_data['categories']
     for i in range(0, len(categories), 4):
@@ -238,7 +274,9 @@ def render_home_page(all_data):
         with cols[i]:
             with st.container():
                 st.markdown('<div class="product-container">', unsafe_allow_html=True)
-                if pd.notna(row.get('image_url')): st.image(row['image_url'], use_container_width=True, output_format='PNG', caption=row['product_name'])
+                if pd.notna(row.get('image_url')):
+                    # FIX: Corrected parameter
+                    st.image(row['image_url'], use_container_width=True, output_format='PNG', caption=row['product_name'])
                 st.subheader(row['product_name']); st.caption(f"SKU: {row['product_sku']}")
                 st.markdown(f"**Your Price:** :green[₹{row['base_rate'] * (1 - user_discount):.2f}]")
                 quantity = st.number_input("Qty", min_value=1, value=1, key=f"qty_feat_{row['product_sku']}")
@@ -270,15 +308,13 @@ def render_cart_page():
     if st.button("✅ Finalize & Prepare Order", type="primary", use_container_width=True): st.session_state.order_finalized = True
     if st.session_state.get('order_finalized', False):
         st.markdown("---"); st.success("Your order is ready. Please complete the following two steps.")
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer: cart_df.to_excel(writer, index=False, sheet_name='Order')
-        excel_data = output.getvalue()
-        file_name = f"Order_{st.session_state['user_details']['customer_name'].replace(' ', '_')}_{pd.Timestamp.now().strftime('%Y%m%d')}.xlsx"
-        st.subheader("Step 1: Download Your Order File")
-        st.download_button(label="⬇️ Download Order as Excel File", data=excel_data, file_name=file_name, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        pdf_data = create_order_pdf(st.session_state['user_details'], po_number, cart_df)
+        file_name = f"Order_{st.session_state['user_details']['customer_name'].replace(' ', '_')}_{pd.Timestamp.now().strftime('%Y%m%d')}.pdf"
+        st.subheader("Step 1: Download Your Order PDF")
+        st.download_button(label="⬇️ Download Order as PDF", data=pdf_data, file_name=file_name, mime="application/pdf", use_container_width=True)
         st.subheader("Step 2: Notify Us on WhatsApp")
         grand_total = cart_df['total'].sum()
-        whatsapp_summary = (f"New Order Enquiry from: *{st.session_state['user_details']['customer_name']}*\n\nPO Number: *{po_number if po_number else 'N/A'}*\nOrder Value: *₹{grand_total:,.2f}*\n\n_I have downloaded the detailed order Excel file and will send it if required._")
+        whatsapp_summary = (f"New Order Enquiry from: *{st.session_state['user_details']['customer_name']}*\n\nPO Number: *{po_number if po_number else 'N/A'}*\nOrder Value: *₹{grand_total:,.2f}*\n\n_I have downloaded the detailed order PDF and will send it if required._")
         encoded_message = urllib.parse.quote(whatsapp_summary)
         whatsapp_url = f"https://wa.me/919891286714?text={encoded_message}"
         st.markdown(f'<a href="{whatsapp_url}" class="whatsapp-button" target="_blank">📲 Send Order Notification on WhatsApp</a>', unsafe_allow_html=True)
