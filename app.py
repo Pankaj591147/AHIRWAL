@@ -1,5 +1,5 @@
 # Ahirwal Trading - Professional B2B Self-Service Portal
-# Definitive Final Version: All features, all fixes, zero errors.
+# Definitive Version based on the user's prototype and final Excel structure.
 
 import streamlit as st
 import pandas as pd
@@ -62,7 +62,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- DATA LOADING ---
+# --- DATA LOADING AND CLEANING ---
 @st.cache_data(ttl=300)
 def load_data(filepath):
     try:
@@ -70,31 +70,37 @@ def load_data(filepath):
         data = {
             'homepage': xls.parse("HomePage"),
             'products': xls.parse("SimpleProducts"),
-            'brands': xls.parse("Brands"),
-            'franchise': xls.parse("Franchise"),
+            'brands': xls.parse("Brands") if "Brands" in xls.sheet_names else pd.DataFrame(),
+            'franchise': xls.parse("Franchise") if "Franchise" in xls.sheet_names else pd.DataFrame(),
             'customers': xls.parse("Customers"),
             'price_tiers': xls.parse("PriceTiers"),
-            'featured': xls.parse("Featured", header=None)
+            'featured': xls.parse("Featured", header=None) # Load with no header
         }
         
+        # --- Data Cleaning and Structuring ---
+        # 1. Clean PriceTiers: Convert whole numbers to percentages
         tiers_df = data['price_tiers']
         tiers_df['discount_percentage'] = tiers_df['discount_percentage'].apply(lambda x: x / 100 if x > 1 else x)
         data['price_tiers'] = tiers_df
 
+        # 2. Clean and Structure Featured products
         featured_df = data['featured']
-        featured_df.columns = ['product_sku', 'col2', 'image_url']
-        featured_df = featured_df[['product_sku', 'image_url']]
+        featured_df.columns = ['product_sku', 'col2', 'image_url'] # Assign correct column names
+        featured_df = featured_df[['product_sku', 'image_url']] # Keep only relevant columns
         
+        # 3. Merge image URLs into the main products dataframe
         products_df = data['products']
+        # Rename columns to avoid conflicts and match prototype
         products_df = products_df.rename(columns={'category_name': 'category', 'product_name': 'name', 'base_units': 'units', 'stock_level': 'stock', 'base_rate': 'rate'})
         products_with_images = pd.merge(products_df, featured_df, on='product_sku', how='left')
-        data['products'] = products_with_images
+        data['products'] = products_with_images # Overwrite with the enhanced dataframe
         
+        # 4. Merge customers with cleaned pricing tiers
         data['customers'] = pd.merge(data['customers'], data['price_tiers'], left_on='price_tier_name', right_on='tier_name')
 
         return data
     except Exception as e:
-        st.error(f"Fatal Error: Could not load or process database.xlsx. Details: {e}")
+        st.error(f"Fatal Error: Could not load or process database.xlsx. Please check all sheet and column names. Details: {e}")
         return None
 
 # --- AUTHENTICATION & SESSION MANAGEMENT ---
@@ -222,6 +228,9 @@ def render_rfq_page():
 def render_brands_page(brands_df):
     st.header("Brands We Deal In")
     st.write("We are proud to be authorized dealers and partners for India's leading industrial brands.")
+    if brands_df.empty:
+        st.warning("Brand information is not available in the database.")
+        return
     for i in range(0, len(brands_df), 5):
         row_brands = brands_df.iloc[i:i+5]
         cols = st.columns(5)
@@ -238,38 +247,41 @@ if all_data:
     if "current_page" not in st.session_state: st.session_state.current_page = "Home"
     if "user_logged_in" not in st.session_state: st.session_state.user_logged_in = False
     
-    # Render the header for all users
-    render_header(st.session_state.user_logged_in)
-    st.markdown("---")
-
-    # If the user is logged in, render the sidebar and protected content
-    if st.session_state.user_logged_in:
-        render_sidebar()
-        
-        if 'rfq_cart' not in st.session_state: st.session_state.rfq_cart = []
-        
-        page = st.session_state.current_page
-        if page == "Dashboard":
-            st.header(f"Welcome to your Dashboard, {st.session_state.user_details['customer_name']}")
-            st.info("Order History, Quotation Requests, and Credit Ledger would be displayed here.")
-        elif page == "Products": render_product_catalogue(all_data['products'], True)
-        elif page == "RFQ": render_rfq_page()
-        elif page == "Brands": render_brands_page(all_data['brands'])
-        # Add other logged-in pages here
-        else: # Default to home for logged in user
-            render_home_page(all_data['homepage'])
+    is_logged_in = st.session_state.user_logged_in
     
-    # If the user is NOT logged in, render public pages and login form
-    else:
+    # Render sidebar only if logged in
+    if is_logged_in:
+        render_sidebar()
+
+    # The main container for header and page content
+    main_container = st.container()
+    with main_container:
+        render_header(is_logged_in)
+        st.markdown("---")
+        
         page = st.session_state.current_page
-        if page == "Login / Sign Up":
-            show_login_form(all_data['customers'])
-        elif page == "Home": render_home_page(all_data['homepage'])
-        elif page == "Products": render_product_catalogue(all_data['products'], False)
-        elif page == "Brands": render_brands_page(all_data['brands'])
-        elif page == "RFQ": render_rfq_page()
-        # Add other public pages here
+
+        # Conditional rendering based on login state
+        if is_logged_in:
+            if 'rfq_cart' not in st.session_state: st.session_state.rfq_cart = []
+            if page == "Dashboard":
+                st.header(f"Welcome to your Dashboard, {st.session_state.user_details['customer_name']}")
+                st.info("Order History, Quotation Requests, and Credit Ledger would be displayed here.")
+            elif page == "Products": render_product_catalogue(all_data['products'], True)
+            elif page == "RFQ": render_rfq_page()
+            elif page == "Brands": render_brands_page(all_data['brands'])
+            else: # Default to home for logged in user
+                render_home_page(all_data['homepage'])
+    
+        # If the user is NOT logged in, render public pages and login form
         else:
-            st.header(page)
-            st.info(f"Content for the {page} page would be displayed here.")
+            if page == "Login / Sign Up":
+                show_login_form(all_data['customers'])
+            elif page == "Home": render_home_page(all_data['homepage'])
+            elif page == "Products": render_product_catalogue(all_data['products'], False)
+            elif page == "Brands": render_brands_page(all_data['brands'])
+            elif page == "RFQ": render_rfq_page()
+            else:
+                st.header(page)
+                st.info(f"Content for the {page} page would be displayed here.")
 
